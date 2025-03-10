@@ -38,24 +38,24 @@ void CConfigDialog::UpdateConfig()
 		{
 			path.Format(L"\\\\.\\%s", MonitoredDiskInfos[i].Id);
 		}
-		else if (MonitoredDiskInfos[i].Type != DiskInfo::DiskType::UNKNOWN)
-		{
-			path.Format(L"\\\\.\\PhysicalDrive%d", MonitoredDiskInfos[i].DeviceId);
-		}
 		else
 		{
-			AfxMessageBox(Utils::FormatCString(Utils::LoadStringTable(IDS_CONFIG_DISKTYPE_UNKNOWN), MonitoredDiskInfos[i].GetDescription()), MB_OK);
-			Utils::LogError(Utils::FormatCString(Utils::LoadStringTable(IDS_CONFIG_DISKTYPE_UNKNOWN), MonitoredDiskInfos[i].GetDescription()));
-			exit(1);
+			DISKMONITOR_ASSERT(
+				MonitoredDiskInfos[i].Type != DiskInfo::DiskType::UNKNOWN,
+				IDS_CONFIG_DISKTYPE_UNKNOWN,
+				MonitoredDiskInfos[i].GetDescription()
+			);
+
+			// SSD, HDD, SCM
+			path.Format(L"\\\\.\\PhysicalDrive%d", MonitoredDiskInfos[i].DeviceId);
 		}
 
 		HANDLE hDevice = CreateFileW(path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-		if (hDevice == INVALID_HANDLE_VALUE)
-		{
-			AfxMessageBox(Utils::FormatCString(Utils::LoadStringTable(IDS_GET_DISKSPEED_ERROR), Utils::GetErrorString(GetLastError())), MB_OK);
-			Utils::LogError(Utils::FormatCString(Utils::LoadStringTable(IDS_GET_DISKSPEED_ERROR), Utils::GetErrorString(GetLastError())));
-			exit(1);
-		}
+		DISKMONITOR_ASSERT(
+			hDevice != INVALID_HANDLE_VALUE,
+			IDS_GET_DISKSPEED_ERROR,
+			Utils::GetErrorString(GetLastError())
+		);
 		
 		m_hDevices[i] = hDevice;
 	}
@@ -199,30 +199,32 @@ void CConfigDialog::onAllDiskAddToMonitor()
 	for (int i = 0; i < n; ++i)
 	{
 		// Check 1. Type cannot be UNKNOWN.
-		if (tempDiskInfos[i].Type == DiskInfo::DiskType::UNKNOWN)
-		{
-			AfxMessageBox(Utils::FormatCString(Utils::LoadStringTable(IDS_CONFIG_DISKTYPE_UNKNOWN), tempDiskInfos[i].GetDescription()), MB_OK);
-			return;
-		}
+		DISKMONITOR_REQUIRE(
+			tempDiskInfos[i].Type != DiskInfo::DiskType::UNKNOWN,
+			IDS_CONFIG_DISKTYPE_UNKNOWN,
+			tempDiskInfos[i].GetDescription()
+		);
 
 		for (int j = i + 1; j < n; ++j)
 		{
 			// Check 2. There cannot be two or more disks with the same Id.
-			if (tempDiskInfos[i].GetDescription() == tempDiskInfos[j].GetDescription())
-			{
-				AfxMessageBox(Utils::FormatCString(Utils::LoadStringTable(IDS_CONFIG_DISKID_CONFLICT), tempDiskInfos[i].GetDescription()), MB_OK);
-				return;
-			}
+			DISKMONITOR_REQUIRE(
+				tempDiskInfos[i].GetDescription() != tempDiskInfos[j].GetDescription(),
+				IDS_CONFIG_DISKID_CONFLICT,
+				tempDiskInfos[i].GetDescription()
+			);
 
 			// Check 3. There cannot be two or more disks which are of different types (LOGICAL, PHYSICAL), but have the same DeviceId.
+
 			if (DiskInfo::IsLogicalDisk(tempDiskInfos[i]) && DiskInfo::IsPhysicalDisk(tempDiskInfos[j]) ||
 				DiskInfo::IsPhysicalDisk(tempDiskInfos[i]) && DiskInfo::IsLogicalDisk(tempDiskInfos[j]))
 			{
-				if (tempDiskInfos[i].DeviceId == tempDiskInfos[j].DeviceId)
-				{
-					AfxMessageBox(Utils::FormatCString(Utils::LoadStringTable(IDS_CONFIG_DISKDEVICE_CONFLICT), tempDiskInfos[i].GetDescription(), tempDiskInfos[j].GetDescription()), MB_OK);
-					return;
-				}
+				DISKMONITOR_REQUIRE(
+					tempDiskInfos[i].DeviceId != tempDiskInfos[j].DeviceId,
+					IDS_CONFIG_DISKDEVICE_CONFLICT,
+					tempDiskInfos[i].GetDescription(),
+					tempDiskInfos[j].GetDescription()
+				);
 			}
 		}
 	}
@@ -398,18 +400,14 @@ void CConfigDialog::OnTimer(UINT_PTR nIDEvent)
 		auto currentTimePoint = std::chrono::high_resolution_clock::now();
 		for (int i = 0; i < n; ++i)
 		{
-			if (DeviceIoControl(m_hDevices[i], IOCTL_DISK_PERFORMANCE, NULL, 0, &diskPerformance, sizeof(diskPerformance), &bytesReturned, NULL))
-			{
-				totalBytesRead += diskPerformance.BytesRead.QuadPart;
-				totalBytesWritten += diskPerformance.BytesWritten.QuadPart;
-			}
-			else
-			{
-				CString errorString = Utils::GetErrorString(GetLastError());
-				AfxMessageBox(Utils::FormatCString(Utils::LoadStringTable(IDS_GET_DISKSPEED_ERROR), errorString), MB_OK);
-				Utils::LogError(Utils::FormatCString(Utils::LoadStringTable(IDS_GET_DISKSPEED_ERROR), errorString));
-				exit(1);
-			}
+			DISKMONITOR_ASSERT(
+				DeviceIoControl(m_hDevices[i], IOCTL_DISK_PERFORMANCE, NULL, 0, &diskPerformance, sizeof(diskPerformance), &bytesReturned, NULL),
+				IDS_GET_DISKSPEED_ERROR,
+				Utils::GetErrorString(GetLastError())
+			);
+
+			totalBytesRead += diskPerformance.BytesRead.QuadPart;
+			totalBytesWritten += diskPerformance.BytesWritten.QuadPart;
 		}
 
 		if (m_lastBytesRead == 0 || m_lastBytesWritten == 0)

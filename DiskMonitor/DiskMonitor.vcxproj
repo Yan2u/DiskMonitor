@@ -200,6 +200,8 @@
     <ClCompile Include="Utils.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\.gitignore" />
+    <None Include="..\README.md" />
     <None Include="DiskMonitor.def" />
     <None Include="res\DiskMonitor.rc2" />
   </ItemGroup>

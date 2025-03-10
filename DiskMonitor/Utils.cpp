@@ -7,7 +7,6 @@
 #include <winioctl.h>
 #include <fstream>
 
-CString Utils::errorMessage;
 CString Utils::logFilePath;
 
 void Utils::assertHResult(HRESULT hr)
@@ -15,10 +14,7 @@ void Utils::assertHResult(HRESULT hr)
 	if (FAILED(hr))
 	{
 		_com_error err(hr);
-		errorMessage = err.ErrorMessage();
-		AfxMessageBox(Utils::FormatCString(Utils::LoadStringTable(IDS_GETDISKINFO_ERROR), errorMessage), MB_OK);
-		Utils::LogError(Utils::FormatCString(Utils::LoadStringTable(IDS_GETDISKINFO_ERROR), errorMessage));
-		exit(1);
+		DISKMONITOR_ASSERT(!(FAILED(hr)), IDS_GETDISKINFO_ERROR, err.ErrorMessage());
 	}
 }
 
@@ -40,25 +36,21 @@ DWORD Utils::GetPhysicalDiskDeviceId(const wchar_t* diskId)
 	// using DiskIoControl
 
 	HANDLE hDevice = CreateFile(Utils::FormatCString(L"\\\\.\\%s", diskId), 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-	if (hDevice == INVALID_HANDLE_VALUE)
-	{
-		CString errorString = Utils::GetErrorString(GetLastError());
-		AfxMessageBox(Utils::FormatCString(Utils::LoadStringTable(IDS_GETPHYSICALDISK_ERROR), errorString), MB_OK);
-		Utils::LogError(Utils::FormatCString(Utils::LoadStringTable(IDS_GETPHYSICALDISK_ERROR), errorString));
-		exit(1);
-	}
-	
+	DISKMONITOR_ASSERT(
+		hDevice != INVALID_HANDLE_VALUE,
+		IDS_GETPHYSICALDISK_ERROR,
+		Utils::GetErrorString(GetLastError())
+	);
+
 	DWORD bytesReturned;
 	STORAGE_DEVICE_NUMBER sdn;
 
 	BOOL result = DeviceIoControl(hDevice, IOCTL_STORAGE_GET_DEVICE_NUMBER, NULL, 0, &sdn, sizeof(sdn), &bytesReturned, NULL);
-	if (!result)
-	{
-		CString errorString = Utils::GetErrorString(GetLastError());
-		AfxMessageBox(Utils::FormatCString(Utils::LoadStringTable(IDS_GETPHYSICALDISK_ERROR), errorString), MB_OK);
-		Utils::LogError(Utils::FormatCString(Utils::LoadStringTable(IDS_GETPHYSICALDISK_ERROR), errorString));
-		exit(1);
-	}
+	DISKMONITOR_ASSERT(
+		result,
+		IDS_GETPHYSICALDISK_ERROR,
+		Utils::GetErrorString(GetLastError())
+	);
 
 	CloseHandle(hDevice);
 	return sdn.DeviceNumber;
@@ -97,7 +89,7 @@ CString Utils::GetErrorString(DWORD errorNumber)
 	}
 	else
 	{
-		result = Utils::FormatCString(Utils::LoadStringTable(IDS_GETERRORSTRING_ERROR), errorNumber);
+		result = Utils::FormatCString(IDS_GETERRORSTRING_ERROR, errorNumber);
 	}
 
 	return result;
@@ -150,14 +142,31 @@ CString Utils::FormatCString(const wchar_t* format, ...)
 	return result;
 }
 
-CString Utils::GetErrorMessage()
+CString Utils::FormatCString(UINT stringID, ...)
 {
-	return errorMessage;
+	static CString format;
+	format.LoadString(stringID);
+
+	CString result;
+	va_list args;
+	va_start(args, stringID);
+	result.FormatV(format.GetString(), args);
+	va_end(args);
+
+	return result;
 }
 
 void Utils::GetAllDiskInfo(std::vector<DiskInfo>& diskInfos)
 {
+	// Try APAERTMENTTHREADED first, if failed, try MULTITHREADED
+
 	HRESULT hr = CoInitializeEx(0, COINIT_APARTMENTTHREADED);
+
+	if (FAILED(hr))
+	{
+		hr = CoInitializeEx(0, COINIT_MULTITHREADED);
+	}
+
 	assertHResult(hr);
 
 	diskInfos.clear();
@@ -267,7 +276,7 @@ void Utils::GetAllDiskInfo(std::vector<DiskInfo>& diskInfos)
 
 		if (diskInfo.Caption.IsEmpty())
 		{
-			diskInfo.Caption = Utils::FormatCString(Utils::LoadStringTable(IDS_DEFAULT_LOGICAL_DISK_CAPTION), diskInfo.Id);
+			diskInfo.Caption = Utils::FormatCString(IDS_DEFAULT_LOGICAL_DISK_CAPTION, diskInfo.Id);
 		}
 
 		hr = pclsObj->Get(L"DeviceID", 0, &vtProp, 0, 0);
@@ -347,4 +356,103 @@ void Utils::LogError(const wchar_t* format, ...)
 	va_end(args);
 
 	logToFile(Utils::logFilePath, L"ERROR", message.GetString());
+}
+
+void Utils::LogInfo(UINT stringID, ...)
+{
+	static CString message, result;
+	message.LoadString(stringID);
+	va_list args;
+	va_start(args, stringID);
+	result.FormatV(message.GetString(), args);
+	va_end(args);
+
+	logToFile(Utils::logFilePath, L"INFO", result.GetString());
+}
+
+void Utils::LogError(UINT stringID, ...)
+{
+	static CString message, result;
+	message.LoadString(stringID);
+	va_list args;
+	va_start(args, stringID);
+	result.FormatV(message, args);
+	va_end(args);
+
+	logToFile(Utils::logFilePath, L"ERROR", result.GetString());
+}
+
+bool Utils::require(bool pred, const wchar_t* format, ...)
+{
+	static CString message;
+
+	if (!pred)
+	{
+		va_list args;
+		va_start(args, format);
+		message.FormatV(format, args);
+		va_end(args);
+
+		AfxMessageBox(message, MB_OK);
+		return false;
+	}
+
+	return true;
+}
+
+bool Utils::require(bool pred, UINT stringID, ...)
+{
+	static CString format, message;
+
+	if (!pred)
+	{
+		format.LoadString(stringID);
+
+		va_list args;
+		va_start(args, stringID);
+		message.FormatV(format.GetString(), args);
+		va_end(args);
+
+		AfxMessageBox(message, MB_OK);
+		
+		return false;
+	}
+
+	return true;
+}
+
+void Utils::assertCritical(CString file, int line, CString expr, bool pred, const wchar_t* format, ...)
+{
+	static CString message;
+
+	if (!pred)
+	{
+		va_list args;
+		va_start(args, format);
+		message.FormatV(format, args);
+		va_end(args);
+
+		AfxMessageBox(message, MB_OK);
+		Utils::LogError(IDS_ASSERT_FAIL, file, line, expr, message.GetString());
+		exit(1);
+	}
+}
+
+void Utils::assertCritical(CString file, int line, CString expr, bool pred, UINT stringID, ...)
+{
+	static CString format, message;
+
+	if (!pred)
+	{
+		format.LoadString(stringID);
+
+		va_list args;
+		va_start(args, stringID);
+		message.FormatV(format.GetString(), args);
+		va_end(args);
+
+		AfxMessageBox(message, MB_OK);
+		Utils::LogError(IDS_ASSERT_FAIL, file, line, expr, message.GetString());
+		exit(1);
+	}
 }

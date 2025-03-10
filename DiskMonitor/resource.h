@@ -53,6 +53,7 @@
 #define IDS_PLUGIN_URL                  1027
 #define IDS_PLUGIN_MONITORING_DISKS     1028
 #define IDS_PLUGIN_TOTAL_DISKIO         1029
+#define IDS_ASSERT_FAIL                 1030
 #define ID_ALLDISK_32771                32771
 #define ID_ALLDISK_32772                32772
 #define ID_MONITOREDDISK_32773          32773
